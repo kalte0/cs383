@@ -1,0 +1,19 @@
+# This is a simple Flask application that displays "Hello, World!" when you run it.
+from flask import Flask 
+app = Flask(__name__) #__name__ variable is special, represents the name of the current module, assigns it to the variable app. 
+
+@app.route('/') # a decorator which tells Flask which URL should trigger the hello_world() function. In this case, the root URL will trigger this function. 
+def hello_world(): # Simple function
+    return 'Hello, World!'
+
+@app.route('/hello/<name>') # Takes in a specific parameter in the url given by a user. 
+def hello_name(name):
+    return 'Hello, {}!'.format(name)
+
+if __name__ == '__main__': # Only starts if this python script is directly run. 
+    app.run(debug=True) #Starts the flask development server. 
+    
+    
+    
+# Default url for flask is: https:// 1270.0.1:5000/
+

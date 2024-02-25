@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>n-gram model testing!</title>
+  <style>
+    .container {
+      display: flex;
+      justify-content: space-between;
+    }
+    .column {
+      flex: 1;
+      padding: 20px;
+    }
+    .text-block {
+      margin-top: 20px;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Model Testing Form</h2>
+
+<div id="status" class="text-block">
+  <p>Status: <span id="serverStatus">Checking...</span></p>
+</div>
+
+<div class="container">
+  <div class="column">
+    <h3>Bigram Model Input</h3>
+    <div id="form1">
+      <label for="input1">start word:</label><br>
+      <input type="text" id="input1" name="input1"><br>
+      <input type="button" value="Submit" onclick="submitBigramRequest()">
+    </div>
+  </div>
+  
+  <div class="column">
+    <h3>Trigram Model Input</h3>
+    <div id="form2">
+      <label for="input3">first word:</label><br>
+      <input type="text" id="input3" name="input3"><br>
+      <label for="input4">second word:</label><br>
+      <input type="text" id="input4" name="input4"><br><br>
+      <input type="submit" value="Submit" onclick="submitTrigramRequest()">
+    </div>
+  </div>
+</div>
+
+<div class="text-block" id="resultBlock">
+  <p>The output from the bigram or trigram model will be printed here!</p>
+</div>
+
+<script>
+  // Check server status when the page loads
+  window.onload = function () {
+    checkServerStatus();
+  };
+
+  function checkServerStatus() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "http://127.0.0.1:5000/check_server_status", true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        if (xhr.status === 200) {
+          document.getElementById("serverStatus").innerText = "Active -- flask server is up and running!";
+        } else {
+          document.getElementById("serverStatus").innerText = "Inactive. Status: " + xhr.status + " be sure to start the flask server!";
+        }
+      }
+    };
+    xhr.send();
+  }
+
+  function submitBigramRequest() {
+    try { 
+        var input1 = document.getElementById("input1").value;
+        var url = "http://127.0.0.1:5000/predict/bigram"; // Flask server URL
+        var data = JSON.stringify({word:`${input1}`});
+    
+        // Make an AJAX request to execute the curl command
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", url, true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+    
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState === 4 && xhr.status === 200) {
+            var response = xhr.responseText;
+            document.getElementById("resultBlock").innerHTML = "<pre>" + response + "</pre>";
+          }
+        };
+        xhr.send(data);
+    }
+    catch(err) {
+        document.getElementById("resultBlock").innerHTML = "<pre>" + err + "</pre>";
+    }
+  }
+
+  function submitTrigramRequest() {
+    try { 
+        var input3 = document.getElementById("input3").value;
+        var input4 = document.getElementById("input4").value;
+        var url = "http://127.0.0.1:5000/predict/trigram"; // Flask server URL
+        var data = JSON.stringify({word1:`${input3}`, word2: `${input4}`});
+    
+        // Make an AJAX request to execute the curl command
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", url, true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+    
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState === 4 && xhr.status === 200) {
+            var response = xhr.responseText;
+            document.getElementById("resultBlock").innerHTML = "<pre>" + response + "</pre>";
+          }
+        };
+        xhr.send(data);
+    }
+    catch(err) {
+        document.getElementById("resultBlock").innerHTML = "<pre>" + err + "</pre>";
+    }
+  }
+</script>
+
+</body>
+</html>
