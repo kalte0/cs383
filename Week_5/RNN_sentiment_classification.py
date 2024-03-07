@@ -24,12 +24,12 @@ while (train_df.empty or (choice < 1 or choice > 3)):
     validation_df = "";
     try:
         if choice == 1:
-            train_df = pd.read_csv('imdb_reviews.csv')
+            train_df = pd.read_csv('data/imdb_reviews.csv')
         elif choice == 2:
-            train_df = pd.read_csv('financial_sentiments.csv')
+            train_df = pd.read_csv('data/financial_sentiments.csv')
         elif choice == 3: 
-            train_df = pd.read_csv('twitter/twitter_training.csv')
-            validation_df = pd.read_csv('twitter/twitter_validation.csv')
+            train_df = pd.read_csv('data/twitter/twitter_training.csv')
+            validation_df = pd.read_csv('data/twitter/twitter_validation.csv')
         else: 
             print("Sorry, that's not an option on the list. Please try again.")
     except:

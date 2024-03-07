@@ -34,8 +34,8 @@ def main():
         sys.exit(1)
 
     # Generate sentence
-    tokenizer = model['tokenizer']
-    max_sequence_len = model['max_sequence_len']
+    tokenizer = model.tokenizer # Dot accessor for tokenizer
+    max_sequence_len = model.max_sequence_len
     generated_sentence = generate_text(model['model'], tokenizer, max_sequence_len, starting_word)
     print("Generated Sentence:", generated_sentence)
 
