@@ -56,7 +56,7 @@ class SentimentClassifier(nn.Module):
         self.transformer = TransformerBlock(embed_size=embed_size, forward_expansion=4)
         self.pool = max_pool
         self.fc = nn.Linear(embed_size, num_classes)
-        self.pos_encoding = positional_encoding(seq_len, embed_size).float() # Cast to float 
+        self.pos_encoding = positional_encoding(seq_len, embed_size).float() # Cast to float -- had to add, because the size of the positional encoding was off, was throwing an error. 
 
     def forward(self, x):
         # Add positional encoding to the input embeddings
