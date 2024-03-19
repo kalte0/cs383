@@ -48,10 +48,10 @@ class SentimentDataset(Dataset):
             token_ids = token_ids[:self.max_length]
 
         # Convert token_ids to tensor
-        text_tensor = torch.tensor(token_ids, dtype=torch.long)
+        text_tensor = torch.tensor(token_ids, dtype=torch.long).to(device)  # Move tensor to device
 
         # Convert label to tensor
-        label_tensor = torch.tensor(self.label_encoder.transform([label])[0], dtype=torch.long)
+        label_tensor = torch.tensor(self.label_encoder.transform([label])[0], dtype=torch.long).to(device)  # Move tensor to device
 
         return text_tensor, label_tensor
 
@@ -77,33 +77,35 @@ class SentimentDataset(Dataset):
         tokenizer['<OOV>'] = len(tokenizer) + 1
         return tokenizer
 
-class SelfAttention(nn.Module):
-    def __init__(self, embed_size):
-        super(SelfAttention, self).__init__()
-        # Initialize linear layers for queries, keys, and values
-        self.query = nn.Linear(embed_size, embed_size)
-        self.key = nn.Linear(embed_size, embed_size)
-        self.value = nn.Linear(embed_size, embed_size)
-        self.embed_size = embed_size
+class SentimentClassifier(nn.Module):
+    def __init__(self, embed_size, num_classes, max_pool=True):
+        super(SentimentClassifier, self).__init__()
+        # Transformer block (acting as the encoder)
+        self.transformer = TransformerBlock(embed_size, forward_expansion=4)
+        self.pool = max_pool
+        # Output fully connected layer for classification
+        self.fc = nn.Linear(embed_size, num_classes)
 
     def forward(self, x):
-        # Generate queries, keys, and values by applying the respective linear transformations
-        Q = self.query(x)
-        K = self.key(x)
-        V = self.value(x)
+        # Ensure input tensor has correct shape and dtype
+        if len(x.shape) == 2:  # If input tensor has shape (batch_size, sequence_length)
+            x = x.unsqueeze(1)  # Add a singleton dimension for the sequence length
+        x = x.float()  # Convert input tensor to float32 dtype
+        # Pass input through the transformer block
+        transformed = self.transformer(x.permute(0, 2, 1))  # Permute the input tensor
 
-        # Calculate attention scores by performing scaled dot-product attention
-        # Scaling by sqrt(embed_size) for stability
-        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(self.embed_size)
+        # Apply global max pooling if specified
+        if self.pool:
+            pooled = torch.max(transformed, dim=1)[0]  # Max pooling across the sequence dimension
+        else:
+            # Keep only the output corresponding to the last token
+            pooled = transformed[:, -1, :]
 
-        # Apply softmax to get probabilities, ensuring that scores sum to 1
-        attention = torch.softmax(attention_scores, dim=-1)
+        # Pass through the output layer to get class logits
+        out = self.fc(pooled)
+        return out.to(device)  # Move tensor to device
 
-        # Multiply the attention scores with the values to get a weighted sum,
-        # which signifies the output of the self-attention layer
-        out = torch.matmul(attention, V)
-        
-        return out
+
 
 class TransformerBlock(nn.Module):
     def __init__(self, embed_size, forward_expansion):
@@ -142,12 +144,13 @@ class SentimentClassifier(nn.Module):
         self.fc = nn.Linear(embed_size, num_classes)
 
     def forward(self, x):
-        # Ensure input tensor has correct shape
-        if len(x.shape) == 2:  # If input tensor has shape (batch_size, sequence_length)
-            x = x.unsqueeze(1)  # Add a singleton dimension for the sequence length
+        # Ensure input tensor has correct shape and dtype
+        x = x.float()  # Convert input tensor to float32 dtype
+        # Reshape input tensor to have three dimensions
+        x = x.unsqueeze(2)  # Add a singleton dimension for the embedding size
         # Pass input through the transformer block
         transformed = self.transformer(x.permute(0, 2, 1))  # Permute the input tensor
-        
+
         # Apply global max pooling if specified
         if self.pool:
             pooled = torch.max(transformed, dim=1)[0]  # Max pooling across the sequence dimension
@@ -157,8 +160,7 @@ class SentimentClassifier(nn.Module):
 
         # Pass through the output layer to get class logits
         out = self.fc(pooled)
-        return out
-
+        return out.to(device)  # Move tensor to device
 
 # Load data
 csv_file = "drive/MyDrive/IMDB Dataset.csv"
@@ -180,7 +182,7 @@ train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32)
 
 # Instantiate the model
-embed_size = 128
+embed_size = 512  # Adjust the embed_size to match the output size of the TransformerBlock
 num_classes = len(train_dataset.label_encoder.classes_)
 model = SentimentClassifier(embed_size, num_classes)
 
@@ -188,16 +190,20 @@ model = SentimentClassifier(embed_size, num_classes)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Training loop
 num_epochs = 5
 for epoch in range(num_epochs):
     model.train()
     for batch_inputs, batch_labels in train_loader:
         optimizer.zero_grad()
-        
-        # Convert input tensor to float
-        batch_inputs = batch_inputs.float()
-        
+
+        # Move tensors to the appropriate device and convert to float
+        batch_inputs = batch_inputs.to(device)
+        batch_labels = batch_labels.to(device)
+
+        # Pass the input to the model
         batch_outputs = model(batch_inputs)
         loss = criterion(batch_outputs, batch_labels)
         loss.backward()
@@ -210,10 +216,10 @@ for epoch in range(num_epochs):
     total = 0
     with torch.no_grad():
         for batch_inputs, batch_labels in val_loader:
-            
-            # Convert input tensor to float
-            batch_inputs = batch_inputs.float()
-            
+            # Move tensors to the appropriate device and convert to float
+            batch_inputs = batch_inputs.to(device)
+            batch_labels = batch_labels.to(device)
+
             batch_outputs = model(batch_inputs)
             val_loss += criterion(batch_outputs, batch_labels).item()
             _, predicted = torch.max(batch_outputs, 1)
@@ -221,3 +227,10 @@ for epoch in range(num_epochs):
             correct += (predicted == batch_labels).sum().item()
 
     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {val_loss/len(val_loader)}, Accuracy: {(correct/total)*100}%")
+
+Output (after running for 14 minutes): 
+Epoch [1/5], Loss: 0.694786510528467, Accuracy: 50.839999999999996%
+Epoch [2/5], Loss: 0.6943874755225623, Accuracy: 50.51%
+Epoch [3/5], Loss: 0.6938558552211846, Accuracy: 51.2%
+Epoch [4/5], Loss: 0.6936140304175429, Accuracy: 51.57000000000001%
+Epoch [5/5], Loss: 0.6926364369285755, Accuracy: 51.78%
