@@ -4,14 +4,14 @@ from transformers import BertTokenizer, BertForMaskedLM
 from torch.utils.data import DataLoader, Dataset
 from datasets import load_dataset
 from transformers import AdamW, get_linear_schedule_with_warmup
-import nltk
-from nltk.corpus import gutenberg
 import random
-# Ray: I'm copying these in, but we will want to go through and remove extraneous imports before we submit. 
-
+# Ray: I'm copying these in, but we will want to go through and remove extraneous imports before we submit.
+from torch.utils.data import TensorDataset
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 dataset = load_dataset("ehovy/race", "all")
 dataset_features = ['example_id', 'article', 'answer', 'question', 'options']
 train_examples = dataset['train']  # Access the training examples
@@ -19,25 +19,33 @@ train_examples = dataset['train']  # Access the training examples
 
 # List to hold tokenized and embedded representations of inputs
 embedded_inputs = []
+count = 0
 
 # Process each example in the training dataset
 for example in train_examples:
+    count = count + 1
+    if count == 101:
+        break
+
     article = example['article']
     question = example['question']
     options = example['options']
 
     # Tokenize article, question, and options with padding
     tokenized_article = tokenizer(article, padding="max_length", truncation=True, max_length=512, return_tensors="pt")
-    tokenized_question = tokenizer(question, padding="max_length", truncation=True, max_length=64, return_tensors="pt")
-    tokenized_options = tokenizer(options, padding="max_length", truncation=True, max_length=64, return_tensors="pt")
+    tokenized_question = tokenizer(question, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    tokenized_options = tokenizer(options, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    article_token = tokenizer('article', padding="max_length", truncation=True, max_length=512, return_tensors="pt")
+    question_token = tokenizer('question', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    options_token = tokenizer('options', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
 
     # Extract input_ids and attention_mask from tokenized inputs
-    article_input_ids = tokenized_article['input_ids'].flatten()
-    article_attention_mask = tokenized_article['attention_mask'].flatten()
-    question_input_ids = tokenized_question['input_ids'].flatten()
-    question_attention_mask = tokenized_question['attention_mask'].flatten()
-    options_input_ids = tokenized_options['input_ids'].flatten()
-    options_attention_mask = tokenized_options['attention_mask'].flatten()
+    article_input_ids = torch.cat((article_token['input_ids'].flatten(), tokenized_article['input_ids'].flatten()), 0)
+    article_attention_mask = torch.cat((article_token['attention_mask'].flatten(), tokenized_article['attention_mask'].flatten()), 0)
+    question_input_ids = torch.cat((question_token['input_ids'].flatten(), tokenized_question['input_ids'].flatten()), 0)
+    question_attention_mask = torch.cat((question_token['attention_mask'].flatten(), tokenized_question['attention_mask'].flatten()), 0)
+    options_input_ids = torch.cat((options_token['input_ids'].flatten(), tokenized_options['input_ids'].flatten()), 0)
+    options_attention_mask = torch.cat((options_token['attention_mask'].flatten(), tokenized_options['attention_mask'].flatten()), 0)
 
     # Create dictionary for this example
     embedded_input = {
@@ -54,7 +62,7 @@ for example in train_examples:
 
 # Now `embedded_articles` contains the tokenized and embedded representations of all articles in the training dataset
 # Let's print an example to see the structure
-print(embedded_inputs[0])
+# print(embedded_inputs[0])
 
 # Convert the list of embedded inputs into a PyTorch TensorDataset
 # This will allow you to easily create DataLoader for training
@@ -65,10 +73,13 @@ question_attention_masks = torch.stack([example['question_attention_mask'] for e
 options_input_ids = torch.stack([example['options_input_ids'] for example in embedded_inputs])
 options_attention_masks = torch.stack([example['options_attention_mask'] for example in embedded_inputs])
 
+inputs = [torch.cat((example['article_input_ids'], example['question_input_ids'], example['options_input_ids']), 0) for example in embedded_inputs]
+inputs_ids = torch.stack(inputs)
+attentions = [torch.cat((example['article_attention_mask'], example['question_attention_mask'], example['options_attention_mask']), 0) for example in embedded_inputs]
+attentions_ids = torch.stack(attentions)
+
 # Create a TensorDataset
-train_dataset = TensorDataset(article_input_ids, article_attention_masks,
-                              question_input_ids, question_attention_masks,
-                              options_input_ids, options_attention_masks)
+train_dataset = TensorDataset(inputs_ids, attentions_ids)
 
 # Now `train_dataset` is a PyTorch TensorDataset containing the input_ids and attention_masks for all inputs
 # You can use `train_dataset` to create a DataLoader for training your model
@@ -85,26 +96,17 @@ answer_indices = [answers.index(answer) for answer in answers_dataset]
 # Convert answer indices list to a tensor
 labels = torch.tensor(answer_indices, dtype=torch.long)
 
-print("HOW TO ACCESS INPUT IDS AND ATTENTION MASKS:")
-print("Article input IDs:", train_dataset[0][0])
-print("Article attention masks:", train_dataset[0][1])
-print("Question input IDs:", train_dataset[0][2])
-print("Question attention masks:", train_dataset[0][3])
-print("Options input IDs:", train_dataset[0][4])
-print("Options attention masks:", train_dataset[0][5])
-
 print("HOW TO ACCESS LABELS (ANSWERS):")
 print(labels)
 
 
-tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-tokenizer.add_special_tokens({'pad_token': '[PAD]'}) 
 model = GPT2LMHeadModel.from_pretrained('gpt2')
+dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
 
-#device = torch.device ("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device ("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def fine_tune_model(model, dataloader, epochs=4, learning_rate=0.00002):
+def fine_tune_model(model, dataloader, epochs=1, learning_rate=0.00002):
     optimizer = AdamW(model.parameters(), lr=learning_rate)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(dataloader)*epochs)
     criterion = nn.CrossEntropyLoss()
@@ -115,6 +117,7 @@ def fine_tune_model(model, dataloader, epochs=4, learning_rate=0.00002):
         total_correct = 0
         total_examples = 0
         for batch in dataloader:
+            print(batch)
             input_ids, attention_mask = batch
             optimizer.zero_grad()
             logits = model(input_ids=input_ids, attention_mask=attention_mask)
@@ -147,5 +150,4 @@ outputs = fine_tuned_model.generate(inputs, max_length=200, do_sample=True, temp
 
 text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 print(text)
-
 
