@@ -73,6 +73,7 @@ question_attention_masks = torch.stack([example['question_attention_mask'] for e
 options_input_ids = torch.stack([example['options_input_ids'] for example in embedded_inputs])
 options_attention_masks = torch.stack([example['options_attention_mask'] for example in embedded_inputs])
 
+# concat all input ids and attentions together so we can have only 1 stream of input instead of 3
 inputs = [torch.cat((example['article_input_ids'], example['question_input_ids'], example['options_input_ids']), 0) for example in embedded_inputs]
 inputs_ids = torch.stack(inputs)
 attentions = [torch.cat((example['article_attention_mask'], example['question_attention_mask'], example['options_attention_mask']), 0) for example in embedded_inputs]
@@ -88,7 +89,7 @@ train_dataset = TensorDataset(inputs_ids, attentions_ids)
 answers = ['A', 'B', 'C', 'D']
 
 # Extract answers from your dataset
-answers_dataset = [example['answer'] for example in dataset['train']]
+answers_dataset = [example['answer'] for example in dataset['train']][:100]
 
 # Map each answer to its index
 answer_indices = [answers.index(answer) for answer in answers_dataset]
@@ -101,7 +102,7 @@ print(labels)
 
 
 model = GPT2LMHeadModel.from_pretrained('gpt2')
-dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
+dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=100, shuffle=True, drop_last=True)
 
 # device = torch.device ("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -117,9 +118,11 @@ def fine_tune_model(model, dataloader, epochs=1, learning_rate=0.00002):
         total_correct = 0
         total_examples = 0
         for batch in dataloader:
-            print(batch)
+            print((batch))
             input_ids, attention_mask = batch
             optimizer.zero_grad()
+            print(len(inputs_ids))
+            print(len(attention_mask))
             logits = model(input_ids=input_ids, attention_mask=attention_mask)
             loss = criterion(logits.view(-1, tokenizer.vocab_size), input_ids.view(-1))
             total_loss += loss.item()
