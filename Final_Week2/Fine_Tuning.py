@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import transformers
 from transformers import BertTokenizer, BertForMaskedLM
 from torch.utils.data import DataLoader, Dataset
 from datasets import load_dataset
@@ -16,7 +17,6 @@ dataset = load_dataset("ehovy/race", "all")
 dataset_features = ['example_id', 'article', 'answer', 'question', 'options']
 train_examples = dataset['train']  # Access the training examples
 
-
 # List to hold tokenized and embedded representations of inputs
 embedded_inputs = []
 count = 0
@@ -30,14 +30,18 @@ for example in train_examples:
     article = example['article']
     question = example['question']
     options = example['options']
+    answers = example['answer']
 
     # Tokenize article, question, and options with padding
     tokenized_article = tokenizer(article, padding="max_length", truncation=True, max_length=512, return_tensors="pt")
     tokenized_question = tokenizer(question, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
     tokenized_options = tokenizer(options, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
-    article_token = tokenizer('article', padding="max_length", truncation=True, max_length=512, return_tensors="pt")
-    question_token = tokenizer('question', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
-    options_token = tokenizer('options', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    tokenized_answers = tokenizer(answers, padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+
+    article_token = tokenizer('article:', padding="max_length", truncation=True, max_length=512, return_tensors="pt")
+    question_token = tokenizer('question:', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    options_token = tokenizer('options:', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
+    answers_token = tokenizer('answers:', padding="max_length", truncation=True, max_length=128, return_tensors="pt")
 
     # Extract input_ids and attention_mask from tokenized inputs
     article_input_ids = torch.cat((article_token['input_ids'].flatten(), tokenized_article['input_ids'].flatten()), 0)
@@ -46,6 +50,8 @@ for example in train_examples:
     question_attention_mask = torch.cat((question_token['attention_mask'].flatten(), tokenized_question['attention_mask'].flatten()), 0)
     options_input_ids = torch.cat((options_token['input_ids'].flatten(), tokenized_options['input_ids'].flatten()), 0)
     options_attention_mask = torch.cat((options_token['attention_mask'].flatten(), tokenized_options['attention_mask'].flatten()), 0)
+    answers_input_ids = torch.cat((answers_token['input_ids'].flatten(), tokenized_answers['input_ids'].flatten()), 0)
+    answers_attention_mask = torch.cat((answers_token['attention_mask'].flatten(), tokenized_answers['attention_mask'].flatten()), 0)
 
     # Create dictionary for this example
     embedded_input = {
@@ -54,7 +60,9 @@ for example in train_examples:
         'question_input_ids': question_input_ids,
         'question_attention_mask': question_attention_mask,
         'options_input_ids': options_input_ids,
-        'options_attention_mask': options_attention_mask
+        'options_attention_mask': options_attention_mask,
+        'answers_input_ids': answers_input_ids,
+        'answers_attention_mask': answers_attention_mask
     }
 
     # Append the embedded input to the list
@@ -72,11 +80,13 @@ question_input_ids = torch.stack([example['question_input_ids'] for example in e
 question_attention_masks = torch.stack([example['question_attention_mask'] for example in embedded_inputs])
 options_input_ids = torch.stack([example['options_input_ids'] for example in embedded_inputs])
 options_attention_masks = torch.stack([example['options_attention_mask'] for example in embedded_inputs])
+answers_input_ids = torch.stack([example['answers_input_ids'] for example in embedded_inputs])
+answers_attention_masks = torch.stack([example['answers_attention_mask'] for example in embedded_inputs])
 
 # concat all input ids and attentions together so we can have only 1 stream of input instead of 3
-inputs = [torch.cat((example['article_input_ids'], example['question_input_ids'], example['options_input_ids']), 0) for example in embedded_inputs]
+inputs = [torch.cat((example['article_input_ids'], example['question_input_ids'], example['options_input_ids'], example['answers_input_ids']), 0) for example in embedded_inputs]
 inputs_ids = torch.stack(inputs)
-attentions = [torch.cat((example['article_attention_mask'], example['question_attention_mask'], example['options_attention_mask']), 0) for example in embedded_inputs]
+attentions = [torch.cat((example['article_attention_mask'], example['question_attention_mask'], example['options_attention_mask'], example['answers_attention_mask']), 0) for example in embedded_inputs]
 attentions_ids = torch.stack(attentions)
 
 # Create a TensorDataset
@@ -102,18 +112,70 @@ print(labels)
 
 
 model = GPT2LMHeadModel.from_pretrained('gpt2')
-dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=100, shuffle=True, drop_last=True)
+
+dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
+test_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
 
 # device = torch.device ("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def fine_tune_model(model, dataloader, epochs=1, learning_rate=0.00002):
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(dataloader)*epochs)
-    criterion = nn.CrossEntropyLoss()
+def fine_tune_model(model, dataloader, test_dataloader, epochs=1, learning_rate=0.00002):
+    # optimizer = AdamW(model.parameters(), lr=learning_rate)
+    # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(dataloader)*epochs)
+    # criterion = nn.CrossEntropyLoss()
 
+    training_args = transformers.TrainingArguments(
+        auto_find_batch_size=True,  # Try to auto-find a batch size.
+        # Also see https://huggingface.co/google/flan-ul2/discussions/16#64c8bdaf4cc48498134a0271
+        learning_rate=2e-4,
+        # bf16=True, # Only on A100
+        save_total_limit=4,
+        # warmup_steps=2,
+        num_train_epochs=30,  # Total number of training epochs.It stablised after 30.
+        output_dir="checkpoints",
+        save_strategy="epoch",
+        report_to=None,
+        logging_steps=25,  # Number of steps between logs.
+        save_safetensors=True,
+        # load_best_model_at_end=True,
+        metric_for_best_model='accuracy',
+        remove_unused_columns=False
+    )
+    trainer = transformers.Trainer(
+        model=model,
+        train_dataset=train_examples,
+        # eval_dataset=dataset[“test”], # 16GB GPU not big enough
+        args=training_args,
+        # data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        # compute_metrics=compute_metrics,
+    )
+    model.config.use_cache = False
+    trainer.train(resume_from_checkpoint=False)
+    trainer.save_model("final_model")
+    transformers.logging.set_verbosity_error()
+
+
+
+    """
+    training_args = transformers.TrainingArguments(
+        output_dir = "None",
+        learning_rate = .00002,
+        per_device_train_batch_size = 8,
+        per_device_eval_batch_size = 8,
+        num_train_epochs = 1,
+        evaluation_strategy = 'epoch',
+        save_strategy = 'no',
+    )
+
+    trainer = transformers.Trainer(
+        model = model,
+        args = training_args,
+        train_dataset = dataloader,
+        eval_dataset = test_dataloader,
+    )
+    trainer.train()
     model.train()
-    for epoch in range(epochs):
+     for epoch in range(epochs):
         total_loss = 0
         total_correct = 0
         total_examples = 0
@@ -140,9 +202,10 @@ def fine_tune_model(model, dataloader, epochs=1, learning_rate=0.00002):
         epoch_loss = total_loss / len(dataloader)
         epoch_accuracy = total_correct / total_examples
         print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss}, Accuracy: {epoch_accuracy}')
+        """
     return model
 
-fine_tuned_model = fine_tune_model(model, dataloader)
+fine_tuned_model = fine_tune_model(model, dataloader, test_dataloader)
 
 sequence = ("He began his permiership by forming a five-man war cabinet which included Chamberlain as Lord President of the Council,"
 "Labor leader Clement Attlee as Lord Privy Seal (later as Deputy Prime Minister), Halifax as Foreign Secretary," 
