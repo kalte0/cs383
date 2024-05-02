@@ -12,7 +12,6 @@ import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from transformers import DataCollatorWithPadding
 
-
 tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 dataset = load_dataset("ehovy/race", "all")
@@ -121,11 +120,11 @@ for i, batch in enumerate(dataloader):
 class CustomDataCollator(DataCollatorWithPadding):
     def __call__(self, features):
         batch = {}
-        for key in features[0].keys():
-            if isinstance(features[0][key], torch.Tensor):
-                batch[key] = torch.stack([feature[key] for feature in features])
-            elif isinstance(features[0][key], str):
-                batch[key] = [feature[key] for feature in features]
+        # Stack input tensors and attention mask tensors
+        batch['input_ids'] = torch.stack([feature[0] for feature in features])
+        batch['attention_mask'] = torch.stack([feature[1] for feature in features])
+        # Extract string values and convert to a tensor
+        # batch['answers'] = torch.tensor([feature[2] for feature in features], dtype=torch.long)
         return batch
 
 def fine_tune_model(model, train_dataset, epochs=1, learning_rate=0.00002): #dataloader, test_dataloader
@@ -155,8 +154,8 @@ def fine_tune_model(model, train_dataset, epochs=1, learning_rate=0.00002): #dat
         train_dataset=train_dataset,
         # eval_dataset=dataset[“test”], # 16GB GPU not big enough
         args=training_args,
-        data_collator=CustomDataCollator(tokenizer),  # Use custom data collator
-        # data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        # data_collator=CustomDataCollator(tokenizer),  # Use custom data collator
+        data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
         # compute_metrics=compute_metrics,
     )
     model.config.use_cache = False
