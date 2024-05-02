@@ -10,6 +10,8 @@ import random
 from torch.utils.data import TensorDataset
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import DataCollatorWithPadding
+
 
 tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
@@ -107,19 +109,26 @@ answer_indices = [answers.index(answer) for answer in answers_dataset]
 # Convert answer indices list to a tensor
 labels = torch.tensor(answer_indices, dtype=torch.long)
 
-print("HOW TO ACCESS LABELS (ANSWERS):")
-print(labels)
-
-
 model = GPT2LMHeadModel.from_pretrained('gpt2')
 
 dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
 test_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True)
-
+print(dataloader)
 # device = torch.device ("cuda" if torch.cuda.is_available() else "cpu")
+for i, batch in enumerate(dataloader):
+    print(i, batch)
 
+class CustomDataCollator(DataCollatorWithPadding):
+    def __call__(self, features):
+        batch = {}
+        for key in features[0].keys():
+            if isinstance(features[0][key], torch.Tensor):
+                batch[key] = torch.stack([feature[key] for feature in features])
+            elif isinstance(features[0][key], str):
+                batch[key] = [feature[key] for feature in features]
+        return batch
 
-def fine_tune_model(model, dataloader, test_dataloader, epochs=1, learning_rate=0.00002):
+def fine_tune_model(model, train_dataset, epochs=1, learning_rate=0.00002): #dataloader, test_dataloader
     # optimizer = AdamW(model.parameters(), lr=learning_rate)
     # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=len(dataloader)*epochs)
     # criterion = nn.CrossEntropyLoss()
@@ -143,9 +152,10 @@ def fine_tune_model(model, dataloader, test_dataloader, epochs=1, learning_rate=
     )
     trainer = transformers.Trainer(
         model=model,
-        train_dataset=train_examples,
+        train_dataset=train_dataset,
         # eval_dataset=dataset[“test”], # 16GB GPU not big enough
         args=training_args,
+        data_collator=CustomDataCollator(tokenizer),  # Use custom data collator
         # data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
         # compute_metrics=compute_metrics,
     )
@@ -153,10 +163,9 @@ def fine_tune_model(model, dataloader, test_dataloader, epochs=1, learning_rate=
     trainer.train(resume_from_checkpoint=False)
     trainer.save_model("final_model")
     transformers.logging.set_verbosity_error()
+    return model
 
-
-
-    """
+"""
     training_args = transformers.TrainingArguments(
         output_dir = "None",
         learning_rate = .00002,
@@ -203,9 +212,10 @@ def fine_tune_model(model, dataloader, test_dataloader, epochs=1, learning_rate=
         epoch_accuracy = total_correct / total_examples
         print(f'Epoch {epoch+1}/{epochs}, Loss: {epoch_loss}, Accuracy: {epoch_accuracy}')
         """
-    return model
 
-fine_tuned_model = fine_tune_model(model, dataloader, test_dataloader)
+#fine_tuned_model = fine_tune_model(model, dataloader, test_dataloader)
+
+fine_tuned_model = fine_tune_model(model, train_dataset)
 
 sequence = ("He began his permiership by forming a five-man war cabinet which included Chamberlain as Lord President of the Council,"
 "Labor leader Clement Attlee as Lord Privy Seal (later as Deputy Prime Minister), Halifax as Foreign Secretary," 
